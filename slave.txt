@@ -1,0 +1,262 @@
+;
+; atmega328_2_slave.asm
+;
+; Created: 21/11/2023 10:55:04 SA
+; Author : Vũ Huy Bảo
+;
+
+
+; Replace with your application code
+
+.macro load_sfr
+ldi r16, @1
+out @0, r16
+.endmacro
+
+.macro load_sfr_2
+ldi r16, @1
+sts @0, r16
+.endmacro
+
+.macro init_stack
+load_sfr sph, high(@0)
+load_sfr spl, low(@0)
+.endmacro
+
+.set data = portd
+.set btn = pind
+.equ col0 = 0
+.equ col1 = 1 
+.equ col2 = 2
+.equ col3 = 3
+.equ row0 = 4
+.equ row1 = 5
+.equ row2 = 6
+.equ row3 = 7
+
+
+
+
+.def col = r17
+.def row = r18
+.def old = r20
+ldi old, 16
+///////////////////////for spi///////////////
+.set ss = 2
+.set mosi = 3
+.set miso = 4
+.set sck = 5
+
+
+main:
+load_sfr ddrc, 0xff
+init_stack ramend
+rcall init_scankey
+rcall init_trigger
+rcall init_spi_slave
+loop:
+rcall scankey
+cpi r19,0xff 
+breq loop
+out portc, r19
+rcall spi_transmit
+rjmp loop
+
+
+init_spi_slave:
+load_sfr spcr, (1<<spe)
+sbi ddrb, (miso)
+ret
+
+
+init_scankey:
+load_sfr ddrd, 0x0f
+load_sfr portd, 0xff
+ret
+
+init_trigger:
+sbi ddrb, 7
+sbi portb, 7
+ret
+
+spi_transmit:
+nop
+nop
+out spdr, r19
+nop
+cbi portb, 7
+wait:
+in r16, spsr
+sbrs r16, spif
+rjmp wait
+in r16, spdr
+nop
+sbi portb, 7
+ret
+
+
+
+
+
+scankey:
+////////////////////check for collumn 0 ///////////////////////////
+
+load_sfr data, 0xFE
+ldi col, 0
+
+sbic btn, row0
+; if set
+rjmp l1
+; if clear
+ldi row, 0
+rjmp found_key
+
+l1:
+sbic btn, row1
+; if set
+rjmp l2
+; if clear
+ldi row, 1
+rjmp found_key
+
+l2:
+sbic btn, row2
+; if set
+rjmp l3
+; if clear
+ldi row, 2
+rjmp found_key
+
+l3:
+sbic btn, row3
+; if set
+rjmp col1_
+; if clear
+ldi row, 3
+rjmp found_key
+
+
+
+////////////////////check for collumn 1 ///////////////////////////
+col1_:
+load_sfr data, 0xFD
+ldi col, 1
+
+sbic btn, row0
+; if set
+rjmp k1
+; if clear
+ldi row, 0
+rjmp found_key
+
+k1:
+sbic btn, row1
+; if set
+rjmp k2
+; if clear
+ldi row, 1
+rjmp found_key
+
+k2:
+sbic btn, row2
+; if set
+rjmp k3
+; if clear
+ldi row, 2
+rjmp found_key
+
+k3:
+sbic btn, row3
+; if set
+rjmp col2_
+; if clear
+ldi row, 3
+rjmp found_key
+
+
+
+////////////////////check for collumn 2 ///////////////////////////
+col2_:
+load_sfr data, 0xFB
+ldi col, 2
+
+sbic btn, row0
+; if set
+rjmp p1
+; if clear
+ldi row, 0
+rjmp found_key
+
+p1:
+sbic btn, row1
+; if set
+rjmp p2
+; if clear
+ldi row, 1
+rjmp found_key
+
+p2:
+sbic btn, row2
+; if set
+rjmp p3
+; if clear
+ldi row, 2
+rjmp found_key
+
+p3:
+sbic btn, row3
+; if set
+rjmp col3_
+; if clear
+ldi row, 3
+rjmp found_key
+
+
+
+////////////////////check for collumn 3 ///////////////////////////
+col3_:
+load_sfr data, 0xF7
+ldi col, 3
+
+sbic btn, row0
+; if set
+rjmp q1
+; if clear
+ldi row, 0
+rjmp found_key
+
+q1:
+sbic btn, row1
+; if set
+rjmp q2
+; if clear
+ldi row, 1
+rjmp found_key
+
+q2:
+sbic btn, row2
+; if set
+rjmp q3
+; if clear
+ldi row, 2
+rjmp found_key
+
+q3:
+sbic btn, row3
+; if set
+rjmp not_found_key
+; if clear
+ldi row, 3
+rjmp found_key
+
+not_found_key:
+ldi r19, 0xff
+ret
+
+found_key:
+ldi r16, 4
+mul r16, row
+add r0, col
+mov r19, r0 ; return value is r19
+ret
+

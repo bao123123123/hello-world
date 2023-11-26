@@ -1,0 +1,259 @@
+;
+; atmega328_1_master.asm
+;
+; Created: 21/11/2023 9:11:47 SA
+; Author : Vũ Huy Bảo
+;
+
+
+; Replace with your application code
+
+
+.macro load_sfr
+ldi r16, @1
+out @0, r16
+.endmacro
+
+.macro load_sfr_2
+ldi r16, @1
+sts @0, r16
+.endmacro
+
+.macro init_stack
+load_sfr sph, high(@0)
+load_sfr spl, low(@0)
+.endmacro
+
+////////////////////////////for lcd//////////////////////
+.def position = r16
+.equ lcd_4bit_2line = 0x28
+.equ lcd_turnoff =0x08
+.equ lcd_clear = 0x01
+.equ lcd_entrymode = 0x06
+.equ lcd_turnon = 0x0C
+.equ lcd_firstrow = 0x80
+.equ lcd_secondrow = 0xC0
+
+.equ data = portd
+.equ control = PORTc
+.SET rs = 1
+.SET rw = 2
+.SET e = 3
+
+///////////////////////for spi///////////////
+.set ss = 2
+.set mosi = 3
+.set miso = 4
+.set sck = 5
+.equ none = 0x00
+
+main:
+init_stack ramend
+rcall init_spi_master
+rcall init_usart
+rcall init_trigger
+rcall lcd_init_4bit
+loop:
+sbic pinc, 0
+; if set
+rjmp loop
+; if clear
+rcall spi_read ; r25 is return value
+lsl r25
+ldi r16, 0x30
+add r25, r16
+sbic pinc, 4
+; if set
+inc r25
+; if clear
+
+ldi r29, lcd_clear
+rcall write_cmd
+
+ldi position, 0
+rcall lcd_first_row_position
+
+cpi r25, 0x3A
+brlo next
+subi r25,10
+ldi r29, '1'
+rcall write_data
+push r25
+ldi r25,'1'
+rcall usart_transmit
+pop r25
+next: 
+mov r29, r25
+rcall write_data
+rcall usart_transmit
+rjmp loop
+
+
+
+
+init_trigger:
+cbi ddrc, 0 
+sbi portc, 0
+ret
+
+init_spi_master:
+load_sfr ddrb, (1<<mosi)|(1<<sck)|(1<<ss)
+load_sfr spcr, (1<<spe)|(1<<mstr)|(1<<spr0)
+sbi portb, ss
+ret
+
+init_usart:
+/////////////// asynchronous, baudrate = 9600, 1 stopbit, 8 bitdata /////////////////////
+load_sfr_2 ucsr0b, (1<<txen0)
+load_sfr_2 ucsr0c, (1<<ucsz00)|(1<<ucsz01)
+////////set baudrate////////////////
+load_sfr_2 ucsr0a, (1<<u2x0)
+load_sfr_2 ubrr0l, low(103)
+ret
+
+spi_read:
+cbi portb, ss
+load_sfr spdr, none
+check:
+in r16, spsr
+sbrs r16, spif
+; if clear
+rjmp check
+; if set then set ss 
+in r25, spdr ; clear flag and read keypad
+sbi portb, ss
+
+ret
+
+usart_transmit:
+lds r16, ucsr0a
+sbrs r16, udre0
+rjmp usart_transmit
+sts udr0, r25
+ret
+
+; r28 is for write delay
+; r29 is for write cmd/data
+
+//////////////////////////////subrountine for lcd//////////////////////////////
+
+lcd_init_4bit:
+
+cbi ddrc, 4
+
+sbi ddrd, 4
+sbi ddrd, 5
+sbi ddrd, 6
+sbi ddrd, 7
+
+sbi ddrc, rs
+sbi ddrc, rw
+sbi ddrc, e
+		   LDI	r28,25
+		   rcall delay_ms		;delay_ms 25MS
+		   LDI  r29,$30 
+		   rcall write_cmd_4bit
+		   LDI	r28,5
+		   rcall delay_ms		;delay_ms 5MS
+		   LDI  r29,$30 
+		   rcall write_cmd_4bit
+		   LDI	r28,1
+		   rcall delay_100us		;delay_ms 100US
+		   LDI  r29,$30 
+		   rcall write_cmd_4bit
+		   LDI  r29,$20 
+		   rcall write_cmd_4bit
+;////////////////////////////////////////////////////////////////////////////////////		    
+           LDI	r29,lcd_4bit_2line
+           rcall write_cmd
+           LDI	r29,lcd_turnon
+           rcall write_cmd   
+           LDI  r29,lcd_entrymode
+           rcall write_cmd  
+		   LDI  r29,lcd_clear
+           rcall write_cmd 
+		   LDI  r29,lcd_firstrow
+           rcall write_cmd
+		   ret 
+
+
+write_cmd:
+	PUSH	r29
+	ANDI	r29,$F0
+	rcall	write_cmd_4bit 
+	POP		r29
+	ANDI	r29,$0F
+	SWAP	r29
+	rcall	write_cmd_4bit 
+	RET
+
+write_cmd_4bit:
+    OUT    data,r29 
+    CBI    control,rs    ; rs = 0 => connect to instruction register (or address counter if read but in this case it write) 	  
+    CBI    control,rw      
+    SBI    control,e        
+    NOP
+    CBI    control,e   ; high to low transistion      
+	LDI	   r28,2
+	rcall   delay_ms		
+    RET   
+
+write_data:
+	PUSH	r29
+	ANDI	r29,$F0
+	rcall	write_data_4bit
+	POP		r29
+	ANDI	r29,$0F
+	SWAP	r29
+	rcall	write_data_4bit  
+	RET
+
+write_data_4bit :
+	OUT	  data,r29  
+    SBI    control,rs  ; rs = 1 => connect to data register (get information into ram)     
+    CBI    control,rw     
+    SBI    control,e      
+    NOP
+    CBI    control,e     ; high to low transistion
+	LDI	   r28,2
+	rcall   delay_ms		
+    RET   
+
+lcd_first_row_position:
+;push r17
+ldi r29, lcd_firstrow 
+add r29, position
+rcall write_cmd
+;pop r17
+ret
+
+//////////////////////////////subrountine for delay//////////////////////////////
+
+delay_ms:
+again3:ldi r17,10
+again2:ldi r16,200
+again:
+nop
+dec r16
+brne again
+dec r17
+brne again2
+dec r28
+brne again3
+
+ret
+
+
+
+
+delay_100us: ; 0.1ms
+again5:
+ldi r16,200
+again4:
+nop
+dec r16
+brne again4
+dec r28
+brne again5
+
+ret
